@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.DirectScanner" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:windowBackground">#000000</item>
+    </style>
+</resources>

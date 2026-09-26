@@ -1,0 +1,98 @@
+package com.example.directscanner
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.wifi.WifiManager
+import android.util.Log
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+/** Scan cadence presets. NOTE: Android itself throttles Wi-Fi scan requests
+ *  for apps (roughly 4 per 2 minutes since Android 9), so TURBO's actual
+ *  refresh rate may be capped by the OS on some devices — see README. */
+enum class ScanSpeed(val intervalMs: Long, val label: String) {
+    BATTERY_SAVER(30_000L, "Battery Saver"),
+    NORMAL(10_000L, "Normal"),
+    TURBO(4_000L, "Turbo")
+}
+
+data class DetectedNetwork(
+    val ssid: String,
+    val rssi: Int,   // dBm; closer to 0 = stronger/closer signal
+    val bssid: String
+)
+
+class WifiScanManager(
+    private val context: Context,
+    private val scope: CoroutineScope
+) {
+    private val wifiManager =
+        context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+
+    private val _detectedNetworks = MutableStateFlow<List<DetectedNetwork>>(emptyList())
+    val detectedNetworks: StateFlow<List<DetectedNetwork>> = _detectedNetworks
+
+    private var loopJob: Job? = null
+    private var receiverRegistered = false
+
+    private val scanReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            refreshFromLastScan()
+        }
+    }
+
+    private fun refreshFromLastScan() {
+        try {
+            val results = wifiManager.scanResults
+            _detectedNetworks.value = results
+                .filter { isTargetNetwork(it.SSID) }
+                .map { DetectedNetwork(ssid = it.SSID, rssi = it.level, bssid = it.BSSID) }
+                .sortedByDescending { it.rssi }
+                .distinctBy { it.ssid } // keep the strongest reading per SSID
+        } catch (se: SecurityException) {
+            Log.e("WifiScanManager", "Missing permission to read scan results", se)
+        }
+    }
+
+    fun start(speed: ScanSpeed) {
+        if (!receiverRegistered) {
+            ContextCompat.registerReceiver(
+                context,
+                scanReceiver,
+                IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            receiverRegistered = true
+        }
+        loopJob?.cancel()
+        loopJob = scope.launch {
+            while (true) {
+                @Suppress("DEPRECATION")
+                val started = wifiManager.startScan()
+                if (!started) {
+                    // Request was throttled/failed; still show latest cached results.
+                    refreshFromLastScan()
+                }
+                delay(speed.intervalMs)
+            }
+        }
+    }
+
+    fun setSpeed(speed: ScanSpeed) = start(speed)
+
+    fun stop() {
+        loopJob?.cancel()
+        loopJob = null
+        if (receiverRegistered) {
+            context.unregisterReceiver(scanReceiver)
+            receiverRegistered = false
+        }
+    }
+}
