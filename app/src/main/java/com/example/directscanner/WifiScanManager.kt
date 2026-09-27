@@ -10,7 +10,9 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
@@ -39,6 +41,12 @@ class WifiScanManager(
     private val _detectedNetworks = MutableStateFlow<List<DetectedNetwork>>(emptyList())
     val detectedNetworks: StateFlow<List<DetectedNetwork>> = _detectedNetworks
 
+    // Fires once per SSID, the moment it's first seen this session — this is
+    // what drives the instant notification, separate from the full list above.
+    private val _newNetworkEvents = MutableSharedFlow<DetectedNetwork>(extraBufferCapacity = 8)
+    val newNetworkEvents: SharedFlow<DetectedNetwork> = _newNetworkEvents
+    private val seenSsids = mutableSetOf<String>()
+
     private var loopJob: Job? = null
     private var receiverRegistered = false
 
@@ -51,11 +59,18 @@ class WifiScanManager(
     private fun refreshFromLastScan() {
         try {
             val results = wifiManager.scanResults
-            _detectedNetworks.value = results
+            val filtered = results
                 .filter { isTargetNetwork(it.SSID) }
                 .map { DetectedNetwork(ssid = it.SSID, rssi = it.level, bssid = it.BSSID) }
                 .sortedByDescending { it.rssi }
                 .distinctBy { it.ssid } // keep the strongest reading per SSID
+            _detectedNetworks.value = filtered
+
+            filtered.forEach { network ->
+                if (seenSsids.add(network.ssid)) {
+                    _newNetworkEvents.tryEmit(network)
+                }
+            }
         } catch (se: SecurityException) {
             Log.e("WifiScanManager", "Missing permission to read scan results", se)
         }
