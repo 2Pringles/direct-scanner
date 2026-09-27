@@ -2,14 +2,33 @@
 
 An Android app that scans for nearby Wi-Fi networks and displays only the
 ones matching a specific naming scheme: SSIDs starting with the exact,
-all-caps prefix `DIRECT-` that also look like printer Wi-Fi Direct broadcasts
-(e.g. `DIRECT-InkJet-HP-PRINTER`).
+all-caps prefix `DIRECT-` (e.g. `DIRECT-0F-HP Color LJ 3301`). The wording
+after the prefix varies a lot between devices, so the prefix itself is the
+only matching rule — no brand/keyword list required.
 
-Matching networks are shown full-screen, one per grid cell, with no
-scrolling — the more of them are found, the more the grid subdivides to fit
-them all. Each network gets its own bold, distinct color (stable for the
-session), and its box grows bigger and brighter the stronger its signal
-(i.e. the closer you are to it).
+In the game these represent "police cruisers." Matching networks are shown
+full-screen, one per grid cell, with no scrolling — the more of them are
+found, the more the grid subdivides to fit them all. Each box:
+- Shows a shortened label (e.g. `DIRECT-0F-HP Color LJ 3301` → `LJ 3301`),
+  stripping the shared prefix/brand wording down to just the distinguishing
+  tail
+- Gets its own distinct, stable border color per network, so you can tell
+  ones you've already seen apart at a glance
+- Grows bigger the closer that network is
+- Flashes red/blue like a police light bar
+- Shows a rough estimated distance in feet (a guess based on signal
+  strength — see the caveat below)
+
+The instant a new cruiser is detected, a notification fires ("Cruiser
+Detected!" + its shortened name), unless turned off in Settings (gear icon,
+top right).
+
+Since the matching rule is just "starts with `DIRECT-`," it can pick up
+other Wi-Fi Direct broadcasts too (a phone, TV, Chromecast, etc.) that
+aren't actually meant to be tracked. **Long-press any box** to stop
+tracking that exact network — it disappears immediately and won't
+notify again. Settings shows a "Not tracking" list of everything you've
+hidden, with a Restore button for each.
 
 ## Requirements
 
@@ -77,17 +96,33 @@ natively on both (this isn't Windows-only) — just:
 
 ## Where to customize
 
-- **Naming rule** — `NetworkFilter.kt`. The `DIRECT-` prefix check is exact
-  and case-sensitive. The list of printer keywords (`PRINTER_KEYWORDS`) is
-  what's used to recognize "apparent printer lingo" after the prefix — add
-  your own terms there if a network isn't matching.
+- **Naming rule** — `NetworkFilter.kt`. Currently just an exact,
+  case-sensitive `DIRECT-` prefix check.
+- **Shortened display name** — `NetworkDisplay.kt`, `shortLabel()`. Strips
+  the `DIRECT-xx-` prefix, then drops known generic brand/product words
+  (`GENERIC_TERMS` — HP, Epson, Canon, Printer, Series, Color, etc.),
+  showing whatever's left (e.g. `DIRECT-0F-HP Color LJ 3301` → `LJ 3301`,
+  `DIRECT-fm-EPSON-SC-F500 Series` → `SC F500`). If a name has no
+  recognizable brand/model wording at all — just a random code like
+  `DIRECT-zHKMA0OE75` — it's shown as-is, since there's nothing generic to
+  strip. Add more words to `GENERIC_TERMS` if a brand keeps showing up.
+- **Distance estimate** — `NetworkDisplay.kt`, `estimateRangeFeet()`. Uses
+  a standard log-distance path-loss formula to turn RSSI into a rough
+  feet estimate. **This is a guess, not a measurement** — RSSI is affected
+  by walls, interference, and the specific phone's radio, so treat it as
+  "closer/farther," not an exact number. Adjust `txPowerAt1m` and
+  `pathLossExponent` to recalibrate if it feels off.
 - **Scan speeds** — `WifiScanManager.kt`, the `ScanSpeed` enum. Adjust the
   three interval values (`BATTERY_SAVER`, `NORMAL`, `TURBO`) in milliseconds.
-- **Proximity look** — `ui/MainScreen.kt`, `proximityFraction()` and
-  `NetworkCard()`. Controls the dBm range used for "far" vs "close", and how
-  strongly that maps to box size/brightness/font size.
+  Reachable in-app via the gear icon → Settings.
+- **Proximity look / siren flash** — `ui/MainScreen.kt`,
+  `proximityFraction()`, `rememberSirenColor()`, and `NetworkCard()`.
+  Controls box size/brightness scaling and the red/blue flash speed
+  (`periodMillis`).
 - **Colors** — `ColorAssigner.kt` assigns each SSID a hue using golden-angle
-  rotation, which keeps arbitrarily many networks visually distinct.
+  rotation, which keeps arbitrarily many networks visually distinct (used
+  for each card's border).
+- **Notification wording** — `NotificationHelper.kt`.
 
 ## Important: Android's built-in scan throttling
 

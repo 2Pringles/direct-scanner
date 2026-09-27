@@ -1,5 +1,6 @@
 package com.example.directscanner.ui
 
+import android.widget.Toast
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -8,20 +9,29 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -29,7 +39,9 @@ import androidx.compose.ui.unit.sp
 import com.example.directscanner.ColorAssigner
 import com.example.directscanner.DetectedNetwork
 import com.example.directscanner.ScanSpeed
+import com.example.directscanner.estimateRangeFeet
 import com.example.directscanner.hslToColor
+import com.example.directscanner.shortLabel
 import kotlin.math.ceil
 import kotlin.math.sqrt
 
@@ -40,29 +52,43 @@ fun MainScreen(
     colorAssigner: ColorAssigner,
     currentSpeed: ScanSpeed,
     notificationsEnabled: Boolean,
+    ignoredSsids: Set<String>,
     onSpeedChange: (ScanSpeed) -> Unit,
     onNotificationsToggle: (Boolean) -> Unit,
+    onIgnoreNetwork: (String) -> Unit,
+    onRestoreNetwork: (String) -> Unit,
     onRequestPermission: () -> Unit
 ) {
+    var showSettings by remember { mutableStateOf(false) }
+
     Surface(color = Color.Black, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(12.dp)) {
             Header(
                 hasPermission = hasPermission,
                 count = networks.size,
-                currentSpeed = currentSpeed,
-                notificationsEnabled = notificationsEnabled,
-                onSpeedChange = onSpeedChange,
-                onNotificationsToggle = onNotificationsToggle,
+                onOpenSettings = { showSettings = true },
                 onRequestPermission = onRequestPermission
             )
             Spacer(Modifier.height(10.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
-                    !hasPermission -> CenteredMessage("Wi-Fi scan permission is required to detect nearby networks.")
-                    networks.isEmpty() -> CenteredMessage("No marked networks detected nearby.", dim = true)
-                    else -> NetworkGrid(networks, colorAssigner)
+                    !hasPermission -> CenteredMessage("Wi-Fi scan permission is required to detect nearby cruisers.")
+                    networks.isEmpty() -> CenteredMessage("No cruisers detected nearby.", dim = true)
+                    else -> NetworkGrid(networks, colorAssigner, onIgnoreNetwork)
                 }
             }
+        }
+
+        if (showSettings) {
+            SettingsDialog(
+                currentSpeed = currentSpeed,
+                notificationsEnabled = notificationsEnabled,
+                ignoredSsids = ignoredSsids,
+                onSpeedChange = onSpeedChange,
+                onNotificationsToggle = onNotificationsToggle,
+                onRestoreNetwork = onRestoreNetwork,
+                onDismiss = { showSettings = false }
+            )
         }
     }
 }
@@ -71,41 +97,23 @@ fun MainScreen(
 private fun Header(
     hasPermission: Boolean,
     count: Int,
-    currentSpeed: ScanSpeed,
-    notificationsEnabled: Boolean,
-    onSpeedChange: (ScanSpeed) -> Unit,
-    onNotificationsToggle: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit,
     onRequestPermission: () -> Unit
 ) {
     Column {
-        Text(
-            text = "DIRECT NETWORKS: $count",
-            color = Color.White,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 20.sp
-        )
-        Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ScanSpeed.entries.forEach { speed ->
-                    if (speed == currentSpeed) {
-                        Button(onClick = { onSpeedChange(speed) }) {
-                            Text(speed.label, fontSize = 12.sp)
-                        }
-                    } else {
-                        OutlinedButton(onClick = { onSpeedChange(speed) }) {
-                            Text(speed.label, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Alerts", color = Color.White, fontSize = 12.sp)
-                Switch(checked = notificationsEnabled, onCheckedChange = onNotificationsToggle)
+            Text(
+                text = "CRUISERS DETECTED: $count",
+                color = Color.White,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 19.sp
+            )
+            IconButton(onClick = onOpenSettings) {
+                Text("\u2699", fontSize = 22.sp, color = Color.White) // gear symbol
             }
         }
         if (!hasPermission) {
@@ -113,6 +121,79 @@ private fun Header(
             Button(onClick = onRequestPermission) { Text("Grant permission") }
         }
     }
+}
+
+@Composable
+private fun SettingsDialog(
+    currentSpeed: ScanSpeed,
+    notificationsEnabled: Boolean,
+    ignoredSsids: Set<String>,
+    onSpeedChange: (ScanSpeed) -> Unit,
+    onNotificationsToggle: (Boolean) -> Unit,
+    onRestoreNetwork: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
+        title = { Text("Settings") },
+        text = {
+            Column {
+                Text("Scan speed", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ScanSpeed.entries.forEach { speed ->
+                        if (speed == currentSpeed) {
+                            Button(onClick = { onSpeedChange(speed) }) {
+                                Text(speed.label, fontSize = 12.sp)
+                            }
+                        } else {
+                            OutlinedButton(onClick = { onSpeedChange(speed) }) {
+                                Text(speed.label, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Instant cruiser alerts", fontWeight = FontWeight.Bold)
+                    Switch(checked = notificationsEnabled, onCheckedChange = onNotificationsToggle)
+                }
+
+                if (ignoredSsids.isNotEmpty()) {
+                    Spacer(Modifier.height(20.dp))
+                    Text("Not tracking", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Long-press a box on the main screen to add one here.",
+                        fontSize = 11.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ignoredSsids.sorted().forEach { ssid ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(shortLabel(ssid), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(ssid, fontSize = 10.sp)
+                                }
+                                TextButton(onClick = { onRestoreNetwork(ssid) }) { Text("Restore") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -135,7 +216,11 @@ private fun CenteredMessage(text: String, dim: Boolean = false) {
  * gets bigger text the closer that network is.
  */
 @Composable
-private fun NetworkGrid(networks: List<DetectedNetwork>, colorAssigner: ColorAssigner) {
+private fun NetworkGrid(
+    networks: List<DetectedNetwork>,
+    colorAssigner: ColorAssigner,
+    onIgnoreNetwork: (String) -> Unit
+) {
     val count = networks.size
     val columns = ceil(sqrt(count.toFloat())).toInt().coerceAtLeast(1)
     val rows = ceil(count / columns.toFloat()).toInt().coerceAtLeast(1)
@@ -150,7 +235,7 @@ private fun NetworkGrid(networks: List<DetectedNetwork>, colorAssigner: ColorAss
                     val index = r * columns + c
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         if (index < count) {
-                            NetworkCard(networks[index], colorAssigner)
+                            NetworkCard(networks[index], colorAssigner, onIgnoreNetwork)
                         }
                     }
                 }
@@ -182,19 +267,43 @@ private fun rememberSirenColor(periodMillis: Int = 400): Color {
 }
 
 @Composable
-private fun NetworkCard(network: DetectedNetwork, colorAssigner: ColorAssigner) {
+private fun NetworkCard(
+    network: DetectedNetwork,
+    colorAssigner: ColorAssigner,
+    onIgnoreNetwork: (String) -> Unit
+) {
+    val context = LocalContext.current
     val proximity = proximityFraction(network.rssi)          // 0 far .. 1 close
     val fillFraction = 0.45f + proximity * 0.55f              // bigger box when closer
     val sirenColor = rememberSirenColor()
     val cardColor = sirenColor.copy(alpha = 0.55f + proximity * 0.45f) // dimmer flash when far
 
-    // A distinct, stable border color per SSID, so networks stay tellable
+    // A distinct, stable border color per SSID, so cruisers stay tellable
     // apart at a glance even while every box is flashing red/blue.
     val borderHue = colorAssigner.hueFor(network.ssid)
     val borderColor = hslToColor(hue = borderHue, saturation = 0.9f, lightness = 0.65f)
     val borderWidth = (3 + proximity * 4).dp
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    val label = shortLabel(network.ssid)
+    val rangeFeet = estimateRangeFeet(network.rssi)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(network.ssid) {
+                detectTapGestures(
+                    onLongPress = {
+                        onIgnoreNetwork(network.ssid)
+                        Toast.makeText(
+                            context,
+                            "Stopped tracking $label — restore it anytime in Settings",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize(fillFraction)
@@ -208,19 +317,19 @@ private fun NetworkCard(network: DetectedNetwork, colorAssigner: ColorAssigner) 
                 modifier = Modifier.padding(8.dp)
             ) {
                 Text(
-                    text = network.ssid,
+                    text = label,
                     color = Color.White,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = (15 + proximity * 11).sp,
+                    fontSize = (16 + proximity * 12).sp,
                     textAlign = TextAlign.Center,
                     maxLines = 2
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "${network.rssi} dBm",
+                    text = "~$rangeFeet ft",
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.sp
+                    fontSize = 13.sp
                 )
             }
         }

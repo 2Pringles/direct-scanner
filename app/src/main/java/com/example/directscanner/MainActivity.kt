@@ -25,14 +25,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        scanManager = WifiScanManager(this, lifecycleScope)
         appPreferences = AppPreferences(this)
+        scanManager = WifiScanManager(this, lifecycleScope, appPreferences)
         NotificationHelper.ensureChannel(this)
 
         setContent {
             var hasPermission by remember { mutableStateOf(hasWifiPermission()) }
             var currentSpeed by remember { mutableStateOf(ScanSpeed.NORMAL) }
             var notificationsEnabled by remember { mutableStateOf(appPreferences.notificationsEnabled) }
+            var ignoredSsids by remember { mutableStateOf(appPreferences.ignoredSsids) }
 
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
                 colorAssigner = colorAssigner,
                 currentSpeed = currentSpeed,
                 notificationsEnabled = notificationsEnabled,
+                ignoredSsids = ignoredSsids,
                 onSpeedChange = {
                     currentSpeed = it
                     scanManager.setSpeed(it)
@@ -75,6 +77,14 @@ class MainActivity : ComponentActivity() {
                 onNotificationsToggle = { enabled ->
                     notificationsEnabled = enabled
                     appPreferences.notificationsEnabled = enabled
+                },
+                onIgnoreNetwork = { ssid ->
+                    scanManager.ignoreNetwork(ssid)
+                    ignoredSsids = appPreferences.ignoredSsids
+                },
+                onRestoreNetwork = { ssid ->
+                    scanManager.unignoreNetwork(ssid)
+                    ignoredSsids = appPreferences.ignoredSsids
                 },
                 onRequestPermission = { permissionLauncher.launch(allPermissions()) }
             )

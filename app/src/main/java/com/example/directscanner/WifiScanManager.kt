@@ -33,7 +33,8 @@ data class DetectedNetwork(
 
 class WifiScanManager(
     private val context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val appPreferences: AppPreferences
 ) {
     private val wifiManager =
         context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -58,9 +59,10 @@ class WifiScanManager(
 
     private fun refreshFromLastScan() {
         try {
+            val ignored = appPreferences.ignoredSsids
             val results = wifiManager.scanResults
             val filtered = results
-                .filter { isTargetNetwork(it.SSID) }
+                .filter { isTargetNetwork(it.SSID) && it.SSID !in ignored }
                 .map { DetectedNetwork(ssid = it.SSID, rssi = it.level, bssid = it.BSSID) }
                 .sortedByDescending { it.rssi }
                 .distinctBy { it.ssid } // keep the strongest reading per SSID
@@ -74,6 +76,23 @@ class WifiScanManager(
         } catch (se: SecurityException) {
             Log.e("WifiScanManager", "Missing permission to read scan results", se)
         }
+    }
+
+    /** Re-filters the most recent scan results immediately (no new radio
+     *  scan triggered) — used right after the ignore list changes so the
+     *  grid updates without waiting for the next scan cycle. */
+    fun reapplyIgnoreFilter() = refreshFromLastScan()
+
+    fun ignoreNetwork(ssid: String) {
+        appPreferences.ignore(ssid)
+        reapplyIgnoreFilter()
+    }
+
+    fun unignoreNetwork(ssid: String) {
+        appPreferences.unignore(ssid)
+        // Treat it as unseen again so it can re-notify once it reappears.
+        seenSsids.remove(ssid)
+        reapplyIgnoreFilter()
     }
 
     fun start(speed: ScanSpeed) {
