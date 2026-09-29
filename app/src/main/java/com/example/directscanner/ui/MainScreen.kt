@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.directscanner.ColorAssigner
 import com.example.directscanner.DetectedNetwork
+import com.example.directscanner.ScanDebugInfo
 import com.example.directscanner.ScanSpeed
 import com.example.directscanner.estimateRangeFeet
 import com.example.directscanner.hslToColor
@@ -53,6 +54,7 @@ fun MainScreen(
     currentSpeed: ScanSpeed,
     notificationsEnabled: Boolean,
     ignoredSsids: Set<String>,
+    debugInfo: ScanDebugInfo,
     onSpeedChange: (ScanSpeed) -> Unit,
     onNotificationsToggle: (Boolean) -> Unit,
     onIgnoreNetwork: (String) -> Unit,
@@ -84,6 +86,7 @@ fun MainScreen(
                 currentSpeed = currentSpeed,
                 notificationsEnabled = notificationsEnabled,
                 ignoredSsids = ignoredSsids,
+                debugInfo = debugInfo,
                 onSpeedChange = onSpeedChange,
                 onNotificationsToggle = onNotificationsToggle,
                 onRestoreNetwork = onRestoreNetwork,
@@ -128,6 +131,7 @@ private fun SettingsDialog(
     currentSpeed: ScanSpeed,
     notificationsEnabled: Boolean,
     ignoredSsids: Set<String>,
+    debugInfo: ScanDebugInfo,
     onSpeedChange: (ScanSpeed) -> Unit,
     onNotificationsToggle: (Boolean) -> Unit,
     onRestoreNetwork: (String) -> Unit,
@@ -191,6 +195,23 @@ private fun SettingsDialog(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(20.dp))
+                Text("Diagnostics", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                val secondsAgo = if (debugInfo.lastScanAt == 0L) {
+                    "never"
+                } else {
+                    "${(System.currentTimeMillis() - debugInfo.lastScanAt) / 1000}s ago"
+                }
+                Text(
+                    "Last scan: $secondsAgo\n" +
+                        "Wi-Fi networks seen: ${debugInfo.totalSeen}\n" +
+                        "Matched \"DIRECT-\": ${debugInfo.matchedDirect}\n" +
+                        "Shown (after untrack list): ${debugInfo.shown}" +
+                        (debugInfo.lastError?.let { "\n\u26A0 $it" } ?: ""),
+                    fontSize = 11.sp
+                )
             }
         }
     )

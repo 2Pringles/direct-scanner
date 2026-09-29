@@ -124,6 +124,31 @@ natively on both (this isn't Windows-only) — just:
   for each card's border).
 - **Notification wording** — `NotificationHelper.kt`.
 
+## Troubleshooting: app shows zero networks even though DIRECT- ones exist
+
+Settings now has a **Diagnostics** section (scroll to the bottom) showing:
+- **Wi-Fi networks seen** — total networks the last scan returned, before
+  any filtering
+- **Matched "DIRECT-"** — how many of those matched the naming rule
+- **Shown** — how many are left after the untrack list is applied
+
+If **Wi-Fi networks seen is 0**, the scan itself is returning nothing —
+this is almost always one of these, not a code bug:
+- The phone's system **Location** toggle is off. Even with the correct
+  in-app permission granted, many Android versions/OEMs still silently
+  return empty Wi-Fi scan results with Location off.
+- **Settings → Location → Wi-Fi scanning** (sometimes called "Wi-Fi &
+  Bluetooth scanning") is turned off. This is a separate system setting
+  from the Location toggle itself and from the app's own permission —
+  it needs to be on for any app to get scan results.
+- The app's permission wasn't actually granted — check
+  **Settings → Apps → Direct Scanner → Permissions**.
+
+If **seen > 0 but matched is 0**, that would mean the actual nearby SSIDs
+don't start with `DIRECT-` after all (worth double-checking the exact
+names again). If **matched > 0 but shown is 0**, the untrack list likely
+has something in it that shouldn't be — check Settings → "Not tracking."
+
 ## Important: Android's built-in scan throttling
 
 Since Android 9, the OS itself limits how often any single app can request

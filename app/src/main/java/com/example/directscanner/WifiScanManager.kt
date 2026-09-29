@@ -31,6 +31,17 @@ data class DetectedNetwork(
     val bssid: String
 )
 
+/** Raw numbers from the most recent scan, for the in-app diagnostics
+ *  readout — lets us tell "scan is returning nothing at all" apart from
+ *  "scan sees networks but none match" apart from "matches, but hidden." */
+data class ScanDebugInfo(
+    val totalSeen: Int = 0,
+    val matchedDirect: Int = 0,
+    val shown: Int = 0,
+    val lastScanAt: Long = 0L,
+    val lastError: String? = null
+)
+
 class WifiScanManager(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -48,6 +59,9 @@ class WifiScanManager(
     val newNetworkEvents: SharedFlow<DetectedNetwork> = _newNetworkEvents
     private val seenSsids = mutableSetOf<String>()
 
+    private val _debugInfo = MutableStateFlow(ScanDebugInfo())
+    val debugInfo: StateFlow<ScanDebugInfo> = _debugInfo
+
     private var loopJob: Job? = null
     private var receiverRegistered = false
 
@@ -61,12 +75,20 @@ class WifiScanManager(
         try {
             val ignored = appPreferences.ignoredSsids
             val results = wifiManager.scanResults
-            val filtered = results
-                .filter { isTargetNetwork(it.SSID) && it.SSID !in ignored }
+            val matched = results.filter { isTargetNetwork(it.SSID) }
+            val filtered = matched
+                .filter { it.SSID !in ignored }
                 .map { DetectedNetwork(ssid = it.SSID, rssi = it.level, bssid = it.BSSID) }
                 .sortedByDescending { it.rssi }
                 .distinctBy { it.ssid } // keep the strongest reading per SSID
             _detectedNetworks.value = filtered
+
+            _debugInfo.value = ScanDebugInfo(
+                totalSeen = results.size,
+                matchedDirect = matched.map { it.SSID }.distinct().size,
+                shown = filtered.size,
+                lastScanAt = System.currentTimeMillis()
+            )
 
             filtered.forEach { network ->
                 if (seenSsids.add(network.ssid)) {
@@ -75,6 +97,7 @@ class WifiScanManager(
             }
         } catch (se: SecurityException) {
             Log.e("WifiScanManager", "Missing permission to read scan results", se)
+            _debugInfo.value = _debugInfo.value.copy(lastError = "Permission error: ${se.message}")
         }
     }
 

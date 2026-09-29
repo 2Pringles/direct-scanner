@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
             }
 
             val networks by scanManager.detectedNetworks.collectAsStateWithLifecycle()
+            val debugInfo by scanManager.debugInfo.collectAsStateWithLifecycle()
 
             MainScreen(
                 hasPermission = hasPermission,
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 currentSpeed = currentSpeed,
                 notificationsEnabled = notificationsEnabled,
                 ignoredSsids = ignoredSsids,
+                debugInfo = debugInfo,
                 onSpeedChange = {
                     currentSpeed = it
                     scanManager.setSpeed(it)
